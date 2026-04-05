@@ -1,0 +1,557 @@
+import React, { useState } from 'react';
+import { Calculator, AlertTriangle, CheckCircle2, DollarSign, Percent, Tag, RefreshCcw, Wallet, ArrowDownRight, Receipt, Target } from 'lucide-react';
+
+export default function App() {
+  const [basePrice, setBasePrice] = useState('');
+  const [priceWithVat, setPriceWithVat] = useState('');
+  const [targetPriceWithVat, setTargetPriceWithVat] = useState('');
+  const [targetBasePrice, setTargetBasePrice] = useState('');
+  const [vatRate, setVatRate] = useState('22');
+  const [costPrice, setCostPrice] = useState('');
+  const [marginPercent, setMarginPercent] = useState('');
+  const [commissionPercent, setCommissionPercent] = useState('');
+  
+  const [result, setResult] = useState(null);
+  const [error, setError] = useState('');
+
+  // форматирование ввода с разделением тысяч
+  const formatInput = (value) => {
+    if (!value) return '';
+    let clean = value.toString().replace(/[^0-9.,]/g, '');
+    clean = clean.replace('.', ',');
+    const parts = clean.split(',');
+    
+    parts[0] = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
+    
+    if (parts.length > 1) {
+      return `${parts[0]},${parts[1].slice(0, 2)}`;
+    }
+    return parts[0];
+  };
+
+  // очистка строки перед математическими расчетами
+  const parseNumber = (val) => {
+    if (!val) return NaN;
+    return parseFloat(val.toString().replace(/\s/g, '').replace(',', '.'));
+  };
+
+  // форматирование вычисляемых значений без лишних нулей
+  const formatCalculatedPrice = (num) => {
+    const rounded = Math.round(num * 100) / 100;
+    return formatInput(rounded.toString());
+  };
+
+  const formatCurrency = (num) => {
+    return new Intl.NumberFormat('ru-RU', { 
+      style: 'currency', 
+      currency: 'RUB',
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 2
+    }).format(num);
+  };
+
+  const handleClear = () => {
+    setBasePrice('');
+    setPriceWithVat('');
+    setTargetPriceWithVat('');
+    setTargetBasePrice('');
+    setVatRate('22');
+    setCostPrice('');
+    setMarginPercent('');
+    setCommissionPercent('');
+    setResult(null);
+    setError('');
+  };
+
+  const handlePriceWithVatChange = (val) => {
+    setPriceWithVat(formatInput(val));
+    const num = parseNumber(val);
+    if (!isNaN(num)) {
+      const base = num / (1 + parseFloat(vatRate) / 100);
+      setBasePrice(formatCalculatedPrice(base));
+    } else {
+      setBasePrice('');
+    }
+  };
+
+  const handleBasePriceChange = (val) => {
+    setBasePrice(formatInput(val));
+    const num = parseNumber(val);
+    if (!isNaN(num)) {
+      const withVat = num * (1 + parseFloat(vatRate) / 100);
+      setPriceWithVat(formatCalculatedPrice(withVat));
+    } else {
+      setPriceWithVat('');
+    }
+  };
+
+  const handleVatRateChange = (rate) => {
+    setVatRate(rate);
+    const bpNum = parseNumber(basePrice);
+    if (!isNaN(bpNum)) {
+      const withVat = bpNum * (1 + parseFloat(rate) / 100);
+      setPriceWithVat(formatCalculatedPrice(withVat));
+    }
+    const tbpNum = parseNumber(targetBasePrice);
+    if (!isNaN(tbpNum)) {
+      const tWithVat = tbpNum * (1 + parseFloat(rate) / 100);
+      setTargetPriceWithVat(formatCalculatedPrice(tWithVat));
+    }
+  };
+
+  const handleTargetPriceWithVatChange = (val) => {
+    setTargetPriceWithVat(formatInput(val));
+    const num = parseNumber(val);
+    if (!isNaN(num)) {
+      const base = num / (1 + parseFloat(vatRate) / 100);
+      setTargetBasePrice(formatCalculatedPrice(base));
+    } else {
+      setTargetBasePrice('');
+    }
+  };
+
+  const handleTargetBasePriceChange = (val) => {
+    setTargetBasePrice(formatInput(val));
+    const num = parseNumber(val);
+    if (!isNaN(num)) {
+      const withVat = num * (1 + parseFloat(vatRate) / 100);
+      setTargetPriceWithVat(formatCalculatedPrice(withVat));
+    } else {
+      setTargetPriceWithVat('');
+    }
+  };
+
+  const handleCalculate = (e) => {
+    if (e) e.preventDefault();
+    setError('');
+    setResult(null);
+
+    const bp = parseNumber(basePrice);
+    const cp = parseNumber(costPrice);
+    const m = parseNumber(marginPercent);
+    const comm = parseNumber(commissionPercent) || 0;
+
+    if (isNaN(bp) || isNaN(cp) || isNaN(m)) {
+      setError('пожалуйста, заполните основные поля корректными числами.');
+      return;
+    }
+    if (bp <= 0 || cp <= 0) {
+      setError('цена и себестоимость должны быть больше нуля.');
+      return;
+    }
+    if (m < 0 || m >= 100) {
+      setError('маржа должна быть от 0 до 99 процентов.');
+      return;
+    }
+
+    const minPrice = cp / (1 - (m / 100));
+    const maxDiscountValue = bp - minPrice;
+    const maxDiscountPercent = (maxDiscountValue / bp) * 100;
+    const isMarginBreached = bp < minPrice;
+
+    // расчет зарплаты менеджера и прибыли без скидки
+    const baseProfit = bp - cp;
+    const minProfit = minPrice - cp;
+    
+    const baseSalary = baseProfit > 0 ? baseProfit * (comm / 100) : 0;
+    const minSalary = minProfit > 0 ? minProfit * (comm / 100) : 0;
+    const salaryLoss = baseSalary - minSalary;
+
+    // анализ желаемой цены со скидкой (если введена)
+    let targetAnalysis = null;
+    const targetBaseNum = parseNumber(targetBasePrice);
+    const targetVatNum = parseNumber(targetPriceWithVat);
+
+    if (!isNaN(targetBaseNum) && targetBaseNum > 0) {
+      const targetProfit = targetBaseNum - cp;
+      const targetMarginCalc = targetProfit > 0 ? (targetProfit / targetBaseNum) * 100 : 0;
+      const targetSalary = targetProfit > 0 ? targetProfit * (comm / 100) : 0;
+      
+      targetAnalysis = {
+        priceWithVat: targetVatNum || (targetBaseNum * (1 + parseFloat(vatRate) / 100)),
+        basePrice: targetBaseNum,
+        margin: targetMarginCalc,
+        marginValue: targetProfit,
+        salary: targetSalary,
+        salaryLoss: baseSalary - targetSalary,
+        isApproved: targetBaseNum >= minPrice,
+        discountPercent: bp > 0 ? ((bp - targetBaseNum) / bp) * 100 : 0,
+        discountValue: bp > 0 ? (bp - targetBaseNum) : 0
+      };
+    }
+
+    setResult({
+      minPrice,
+      minProfit: isMarginBreached ? 0 : minProfit,
+      maxDiscountValue: isMarginBreached ? 0 : maxDiscountValue,
+      maxDiscountPercent: isMarginBreached ? 0 : maxDiscountPercent,
+      isMarginBreached,
+      baseSalary: isMarginBreached ? 0 : baseSalary,
+      minSalary: isMarginBreached ? 0 : minSalary,
+      salaryLoss: isMarginBreached ? 0 : salaryLoss,
+      hasCommission: comm > 0,
+      targetAnalysis
+    });
+  };
+
+  const presetMargins = ['10', '15', '20', '30'];
+  const presetCommissions = ['5', '10', '15'];
+
+  return (
+    <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4 font-sans text-slate-800">
+      <div className="max-w-md w-full bg-white rounded-2xl shadow-xl overflow-hidden border border-slate-100">
+        
+        <div className="bg-blue-600 p-6 text-center">
+          <div className="flex justify-center mb-3">
+            <div className="p-3 bg-white/20 rounded-full">
+              <Calculator className="w-8 h-8 text-white" />
+            </div>
+          </div>
+          <h2 className="text-xl font-bold text-white">Калькулятор скидки</h2>
+          <p className="text-blue-100 text-sm mt-1">расчет предельной скидки и вашей премии</p>
+        </div>
+
+        <div className="p-6">
+          <form onSubmit={handleCalculate} className="space-y-5">
+            
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-semibold text-slate-700 mb-1.5">
+                  ставка ндс
+                </label>
+                <div className="flex gap-1.5">
+                  {['5', '7', '10', '22'].map((rate) => (
+                    <button
+                      key={rate}
+                      type="button"
+                      onClick={() => handleVatRateChange(rate)}
+                      className={`flex-1 py-2.5 rounded-xl text-xs font-bold transition-all ${
+                        vatRate === rate
+                          ? 'bg-blue-600 text-white shadow-md shadow-blue-200'
+                          : 'bg-slate-100 hover:bg-slate-200 text-slate-600'
+                      }`}
+                    >
+                      {rate}%
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-semibold text-slate-700 mb-1.5">
+                  цена с ндс
+                </label>
+                <div className="relative">
+                  <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                    <Receipt className="h-5 w-5 text-slate-400" />
+                  </div>
+                  <input
+                    type="text"
+                    inputMode="decimal"
+                    value={priceWithVat}
+                    onChange={(e) => handlePriceWithVatChange(e.target.value)}
+                    placeholder="например: 18 300"
+                    className="w-full pl-10 pr-8 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all text-slate-900"
+                  />
+                  <div className="absolute inset-y-0 right-0 pr-3 flex items-center pointer-events-none">
+                    <span className="text-slate-400 font-medium">₽</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1.5 flex items-center gap-1">
+                  желаемая (с ндс)
+                  <span className="text-[9px] font-normal px-1.5 py-0.5 bg-slate-100 text-slate-500 rounded-full">опция</span>
+                </label>
+                <div className="relative">
+                  <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                    <Target className="h-4 w-4 text-slate-400" />
+                  </div>
+                  <input
+                    type="text"
+                    inputMode="decimal"
+                    value={targetPriceWithVat}
+                    onChange={(e) => handleTargetPriceWithVatChange(e.target.value)}
+                    placeholder="с ндс"
+                    className="w-full pl-9 pr-3 py-2.5 bg-indigo-50 border border-indigo-100 rounded-xl focus:ring-2 focus:ring-indigo-400 focus:border-indigo-400 outline-none transition-all text-indigo-900 placeholder:text-indigo-300 text-sm"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1.5 flex items-center gap-1">
+                  желаемая (без ндс)
+                </label>
+                <div className="relative">
+                  <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                    <Target className="h-4 w-4 text-slate-400" />
+                  </div>
+                  <input
+                    type="text"
+                    inputMode="decimal"
+                    value={targetBasePrice}
+                    onChange={(e) => handleTargetBasePriceChange(e.target.value)}
+                    placeholder="без ндс"
+                    className="w-full pl-9 pr-3 py-2.5 bg-indigo-50 border border-indigo-100 rounded-xl focus:ring-2 focus:ring-indigo-400 focus:border-indigo-400 outline-none transition-all text-indigo-900 placeholder:text-indigo-300 text-sm"
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div className="pt-2 border-t border-slate-100">
+              <label className="block text-sm font-semibold text-slate-700 mb-1.5">
+                базовая цена (без ндс)
+              </label>
+              <div className="relative">
+                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                  <Tag className="h-5 w-5 text-slate-400" />
+                </div>
+                <input
+                  type="text"
+                  inputMode="decimal"
+                  value={basePrice}
+                  onChange={(e) => handleBasePriceChange(e.target.value)}
+                  placeholder="например: 15 000"
+                  className="w-full pl-10 pr-8 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all text-slate-900"
+                />
+                <div className="absolute inset-y-0 right-0 pr-3 flex items-center pointer-events-none">
+                  <span className="text-slate-400 font-medium">₽</span>
+                </div>
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-sm font-semibold text-slate-700 mb-1.5">
+                себестоимость товара или услуги
+              </label>
+              <div className="relative">
+                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                  <DollarSign className="h-5 w-5 text-slate-400" />
+                </div>
+                <input
+                  type="text"
+                  inputMode="decimal"
+                  value={costPrice}
+                  onChange={(e) => setCostPrice(formatInput(e.target.value))}
+                  placeholder="например: 10 000"
+                  className="w-full pl-10 pr-8 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all text-slate-900"
+                />
+                <div className="absolute inset-y-0 right-0 pr-3 flex items-center pointer-events-none">
+                  <span className="text-slate-400 font-medium">₽</span>
+                </div>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-semibold text-slate-700 mb-1.5">
+                  мин. маржа
+                </label>
+                <div className="relative">
+                  <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                    <Percent className="h-4 w-4 text-slate-400" />
+                  </div>
+                  <input
+                    type="text"
+                    inputMode="decimal"
+                    value={marginPercent}
+                    onChange={(e) => setMarginPercent(formatInput(e.target.value))}
+                    placeholder="20"
+                    className="w-full pl-9 pr-6 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all text-slate-900"
+                  />
+                </div>
+                <div className="flex flex-wrap gap-1 mt-2">
+                  {presetMargins.map((preset) => (
+                    <button
+                      key={preset}
+                      type="button"
+                      onClick={() => setMarginPercent(preset)}
+                      className="text-[10px] px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded transition-colors font-medium"
+                    >
+                      {preset}%
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-semibold text-slate-700 mb-1.5">
+                  % вашей премии
+                </label>
+                <div className="relative">
+                  <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                    <Wallet className="h-4 w-4 text-slate-400" />
+                  </div>
+                  <input
+                    type="text"
+                    inputMode="decimal"
+                    value={commissionPercent}
+                    onChange={(e) => setCommissionPercent(formatInput(e.target.value))}
+                    placeholder="10"
+                    className="w-full pl-9 pr-6 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all text-slate-900"
+                  />
+                </div>
+                <div className="flex flex-wrap gap-1 mt-2">
+                  {presetCommissions.map((preset) => (
+                    <button
+                      key={preset}
+                      type="button"
+                      onClick={() => setCommissionPercent(preset)}
+                      className="text-[10px] px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded transition-colors font-medium"
+                    >
+                      {preset}%
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            {error && (
+              <div className="text-red-500 text-sm text-center bg-red-50 py-2 rounded-lg">
+                {error}
+              </div>
+            )}
+
+            <div className="flex gap-3 pt-2">
+              <button
+                type="button"
+                onClick={handleClear}
+                className="flex-shrink-0 flex items-center justify-center w-12 bg-slate-100 hover:bg-slate-200 text-slate-500 rounded-xl transition-colors"
+                title="очистить форму"
+              >
+                <RefreshCcw className="w-5 h-5" />
+              </button>
+              <button
+                type="submit"
+                className="flex-1 bg-blue-600 hover:bg-blue-700 text-white hover:text-white active:text-white font-semibold py-3 rounded-xl transition-colors shadow-md shadow-blue-200"
+              >
+                Рассчитать
+              </button>
+            </div>
+          </form>
+
+          {result && (
+            <div className="mt-6 pt-6 border-t border-slate-100 animate-in fade-in slide-in-from-bottom-2 duration-300 space-y-4">
+              
+              {result.isMarginBreached ? (
+                <div className="bg-red-50 border border-red-200 p-4 rounded-xl flex items-start gap-3">
+                  <AlertTriangle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
+                  <div>
+                    <h4 className="text-sm font-bold text-red-800">внимание: скидка невозможна</h4>
+                    <p className="text-xs text-red-600 mt-1">
+                      базовая цена уже ниже порога минимальной маржи. сделка убыточна.
+                    </p>
+                  </div>
+                </div>
+              ) : (
+                <>
+                  {/* блок анализа желаемой цены, если она введена */}
+                  {result.targetAnalysis ? (
+                    result.targetAnalysis.isApproved ? (
+                      <div className="bg-emerald-50 border border-emerald-200 p-4 rounded-xl flex items-start gap-3">
+                        <CheckCircle2 className="w-5 h-5 text-emerald-600 flex-shrink-0 mt-0.5" />
+                        <div className="w-full">
+                          <h4 className="text-sm font-bold text-emerald-800">желаемая цена одобрена</h4>
+                          <p className="text-xs text-emerald-700 mt-1 mb-3">
+                            скидка составит {result.targetAnalysis.discountPercent.toFixed(1)}% ({formatCurrency(result.targetAnalysis.discountValue)}). итоговая маржа сделки: {result.targetAnalysis.margin.toFixed(1)}% ({formatCurrency(result.targetAnalysis.marginValue)}).
+                          </p>
+                          
+                          {result.hasCommission && (
+                            <div className="bg-white/60 rounded-lg p-3 border border-emerald-100 space-y-1.5">
+                              <div className="flex justify-between items-center">
+                                <span className="text-xs font-medium text-slate-500">ваша премия без скидки:</span>
+                                <span className="text-xs font-bold text-slate-700">{formatCurrency(result.baseSalary)}</span>
+                              </div>
+                              <div className="flex justify-between items-center">
+                                <span className="text-xs font-medium text-slate-800">ваша премия со скидкой:</span>
+                                <span className="text-sm font-bold text-emerald-700">{formatCurrency(result.targetAnalysis.salary)}</span>
+                              </div>
+                              {result.targetAnalysis.salaryLoss > 0 && (
+                                <div className="flex justify-between items-center text-red-500 pt-1 border-t border-emerald-50">
+                                  <span className="text-[10px] flex items-center gap-1">
+                                    <ArrowDownRight className="w-3 h-3" />
+                                    потеря из-за скидки:
+                                  </span>
+                                  <span className="text-[10px] font-bold">{formatCurrency(result.targetAnalysis.salaryLoss)}</span>
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="bg-red-50 border border-red-200 p-4 rounded-xl flex items-start gap-3">
+                        <AlertTriangle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
+                        <div className="w-full">
+                          <h4 className="text-sm font-bold text-red-800">желаемая цена не проходит</h4>
+                          <p className="text-xs text-red-600 mt-1">
+                            клиент просит слишком много. при такой цене маржа падает до {result.targetAnalysis.margin.toFixed(1)}% ({formatCurrency(result.targetAnalysis.marginValue)}), что ниже допустимых {marginPercent}%.
+                          </p>
+                          <div className="mt-3 pt-3 border-t border-red-100">
+                            <p className="text-xs font-medium text-red-800 mb-1">максимум, что вы можете дать:</p>
+                            <p className="text-sm font-bold text-red-700">
+                              скидка {result.maxDiscountPercent.toFixed(1)}% ({formatCurrency(result.maxDiscountValue)}) (до цены {formatCurrency(result.minPrice * (1 + parseFloat(vatRate)/100))} с ндс)
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    )
+                  ) : (
+                    /* стандартный блок макс. скидки, если желаемая цена не введена */
+                    <div className="bg-indigo-50 border border-indigo-100 p-4 rounded-xl flex items-start gap-3">
+                      <CheckCircle2 className="w-5 h-5 text-indigo-600 flex-shrink-0 mt-0.5" />
+                      <div>
+                        <h4 className="text-sm font-bold text-indigo-900">лимит скидки рассчитан</h4>
+                        <p className="text-xs text-indigo-700 mt-1">
+                          вы можете уступить клиенту до <strong>{result.maxDiscountPercent.toFixed(1)}%</strong> ({formatCurrency(result.maxDiscountValue)} от базы), опустив базовую цену до {formatCurrency(result.minPrice)}. маржа сделки составит {marginPercent}% ({formatCurrency(result.minProfit)}).
+                        </p>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* общая статистика по зп выводится только если не было детального анализа желаемой цены */}
+                  {result.hasCommission && !result.targetAnalysis && (
+                    <div className="bg-slate-800 text-white p-5 rounded-xl shadow-lg relative overflow-hidden">
+                      <div className="absolute top-0 right-0 p-4 opacity-10 pointer-events-none">
+                        <Wallet className="w-24 h-24" />
+                      </div>
+                      
+                      <h4 className="text-sm font-semibold text-slate-300 mb-4">ваша личная премия</h4>
+                      
+                      <div className="space-y-3 relative z-10">
+                        <div className="flex justify-between items-end border-b border-slate-700 pb-2">
+                          <span className="text-sm text-slate-400">без скидки клиенту</span>
+                          <span className="text-lg font-bold text-emerald-400">{formatCurrency(result.baseSalary)}</span>
+                        </div>
+                        
+                        <div className="flex justify-between items-end border-b border-slate-700 pb-2">
+                          <span className="text-sm text-slate-400">при макс. скидке</span>
+                          <span className="text-lg font-bold text-amber-400">{formatCurrency(result.minSalary)}</span>
+                        </div>
+
+                        {result.salaryLoss > 0 && (
+                          <div className="flex justify-between items-center pt-2 text-red-400 bg-red-900/30 -mx-2 px-2 py-1.5 rounded-lg">
+                            <span className="text-xs font-medium flex items-center gap-1">
+                              <ArrowDownRight className="w-4 h-4" />
+                              максимальная потеря
+                            </span>
+                            <span className="text-sm font-bold">{formatCurrency(result.salaryLoss)}</span>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </>
+              )}
+
+            </div>
+          )}
+
+        </div>
+      </div>
+    </div>
+  );
+}
